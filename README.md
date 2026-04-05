@@ -1,4 +1,4 @@
-# BizLedger 💼
+# BizLedger
 
 A clean, minimal finance tracker built for freelancers and small business owners. Track income, expenses, taxes, and budget allocations — all in one place.
 
@@ -58,7 +58,7 @@ Tax estimates are for informational purposes only and assume a single filer with
 
 ## Developer
 
-Made by **Your Name** — [GitHub](https://github.com/yourusername)
+Made by Benaiah Whaley — [GitHub](https://github.com/lioncoder4132)
 
 ---
 
