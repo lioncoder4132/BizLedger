@@ -1,17 +1,17 @@
-import { useState, useMemo } from "react";
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Platform, Modal, Linking } from "react-native";
+import { useState, useMemo, useEffect } from "react";
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Modal, Linking, Image } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NavigationContainer, useFocusEffect } from "@react-navigation/native";
+import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { useEffect } from "react";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import Svg, { Rect, Line, Circle, Path } from "react-native-svg";
 import Swiper from "react-native-swiper";
-import Svg, { Rect, Line, Circle, Path, G } from "react-native-svg";
-import { Image } from "react-native";
 
 const Tab = createBottomTabNavigator();
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const TAX_BRACKETS = [
   { min: 0, max: 11600, rate: 0.10 },
@@ -24,6 +24,16 @@ const TAX_BRACKETS = [
 ];
 
 const SE_TAX_RATE = 0.1413;
+
+const CATEGORIES = {
+  income: ["Client Payment", "Product Sale", "Consulting", "Royalties", "Grant", "Other Income"],
+  expense: ["Software/Tools", "Hardware", "Marketing", "Travel", "Office Supplies", "Contractor", "Education", "Meals", "Insurance", "Utilities", "Other Expense"],
+};
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+function generateId() { return Math.random().toString(36).slice(2, 9); }
 
 function estimateTax(netProfit) {
   if (netProfit <= 0) return { federal: 0, selfEmployment: 0, total: 0, effectiveRate: 0 };
@@ -41,16 +51,52 @@ function estimateTax(netProfit) {
   return { federal, selfEmployment: seTax, total, effectiveRate };
 }
 
-const CATEGORIES = {
-  income: ["Client Payment", "Product Sale", "Consulting", "Royalties", "Grant", "Other Income"],
-  expense: ["Software/Tools", "Hardware", "Marketing", "Travel", "Office Supplies", "Contractor", "Education", "Meals", "Insurance", "Utilities", "Other Expense"],
-};
+function getNextDate(date, interval) {
+  const d = new Date(date);
+  if (interval === "weekly") d.setDate(d.getDate() + 7);
+  if (interval === "monthly") d.setMonth(d.getMonth() + 1);
+  if (interval === "yearly") d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().split("T")[0];
+}
 
-const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-function generateId() { return Math.random().toString(36).slice(2, 9); }
+function isDue(nextDate) {
+  return nextDate <= new Date().toISOString().split("T")[0];
+}
 
+// ─── YEAR SELECTOR ────────────────────────────────────────────────────────────
 
-// ─── ONBOARDINGSCREEN ───────────────────────────────────────────────────────────────
+function YearSelector({ transactions, selectedYear, setSelectedYear }) {
+  const years = [...new Set(transactions.map(t => t.date.slice(0, 4)))];
+  if (!years.includes(selectedYear)) years.push(selectedYear);
+  years.sort((a, b) => b - a);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <View style={{ marginBottom: 16 }}>
+      <TouchableOpacity
+        style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#141517", borderWidth: 1, borderColor: "#333", borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 }}
+        onPress={() => setOpen(!open)}>
+        <Text style={{ color: "#c9f542", fontFamily: "monospace", fontSize: 13 }}>📅 {selectedYear}</Text>
+        <Text style={{ color: "#666", fontSize: 12 }}>{open ? "▲" : "▼"}</Text>
+      </TouchableOpacity>
+      {open && (
+        <View style={{ backgroundColor: "#141517", borderWidth: 1, borderColor: "#333", borderRadius: 8, marginTop: 4, overflow: "hidden" }}>
+          {years.map(y => (
+            <TouchableOpacity
+              key={y}
+              style={{ paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1e1f23", backgroundColor: y === selectedYear ? "rgba(201,245,66,0.07)" : "transparent" }}
+              onPress={() => { setSelectedYear(y); setOpen(false); }}>
+              <Text style={{ color: y === selectedYear ? "#c9f542" : "#aaa", fontFamily: "monospace", fontSize: 13 }}>{y}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── ONBOARDING ───────────────────────────────────────────────────────────────
+
 function OnboardingScreen({ onFinish }) {
   return (
     <View style={{ flex: 1, backgroundColor: "#0e0f11" }}>
@@ -118,106 +164,70 @@ function OnboardingScreen({ onFinish }) {
   );
 }
 
-const ob = StyleSheet.create({
-  slide: { flex: 1, backgroundColor: "#0e0f11", paddingHorizontal: 32, justifyContent: "center", paddingBottom: 80 },
-  iconBox: { width: 80, height: 80, borderRadius: 20, backgroundColor: "rgba(201,245,66,0.1)", borderWidth: 1, borderColor: "rgba(201,245,66,0.2)", alignItems: "center", justifyContent: "center", marginBottom: 32 },
-  iconText: { fontSize: 36, color: "#c9f542" },
-  tag: { color: "#555", fontSize: 10, letterSpacing: 3, marginBottom: 8 },
-  title: { color: "#e8e3d9", fontSize: 42, fontWeight: "800", lineHeight: 48, marginBottom: 16 },
-  body: { color: "#666", fontSize: 15, lineHeight: 24, marginBottom: 24 },
-  featureList: { gap: 10 },
-  featureRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  featureDot: { color: "#4ecdc4", fontSize: 12 },
-  featureText: { color: "#555", fontSize: 13 },
-  btn: { backgroundColor: "#c9f542", borderRadius: 12, paddingVertical: 16, paddingHorizontal: 32, alignItems: "center", marginTop: 8 },
-  btnText: { color: "#0e0f11", fontWeight: "800", fontSize: 16 },
-});
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
-function getNextDate(date, interval) {
-  const d = new Date(date);
-  if (interval === "weekly") d.setDate(d.getDate() + 7);
-  if (interval === "monthly") d.setMonth(d.getMonth() + 1);
-  if (interval === "yearly") d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().split("T")[0];
-}
-
-function isDue(nextDate) {
-  return nextDate <= new Date().toISOString().split("T")[0];
-}
-
-// ─── DASHBOARD ───────────────────────────────────────────────────────────────
-function DashboardScreen({ transactions }) {
+function DashboardScreen({ transactions, selectedYear, setSelectedYear }) {
   const [showAbout, setShowAbout] = useState(false);
-  const totalIncome = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const filtered = transactions.filter(t => t.date.startsWith(selectedYear));
+
+  const totalIncome = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const netProfit = totalIncome - totalExpenses;
   const taxes = estimateTax(netProfit);
 
   const expenseByCategory = useMemo(() => {
     const map = {};
-    transactions.filter(t => t.type === "expense").forEach(t => {
+    filtered.filter(t => t.type === "expense").forEach(t => {
       map[t.category] = (map[t.category] || 0) + t.amount;
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [transactions]);
+  }, [filtered]);
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
-
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-      <Text style={[s.pageTitle, { marginBottom: 0 }]}>Overview</Text>
-      <TouchableOpacity onPress={() => setShowAbout(true)} style={{ borderWidth: 1, borderColor: "#333", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}>
-        <Text style={{ color: "#666", fontSize: 12, fontFamily: "monospace" }}>About</Text>
-      </TouchableOpacity>
-    </View>
-
-
-    <Modal visible={showAbout} animationType="slide" transparent={true} onRequestClose={() => setShowAbout(false)}>
-      <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" }}>
-        <View style={{ backgroundColor: "#141517", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 28, borderTopWidth: 1, borderColor: "#333" }}>
-      
-          {/* Header */}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-            <Text style={{ color: "#e8e3d9", fontSize: 20, fontWeight: "800" }}>About BizLedger</Text>
-            <TouchableOpacity onPress={() => setShowAbout(false)} style={{ borderWidth: 1, borderColor: "#333", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}>
-              <Text style={{ color: "#666", fontSize: 12 }}>✕ Close</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Version */}
-          <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
-            <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Version</Text>
-            <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>1.0.0</Text>
-          </View>
-
-          {/* Description */}
-          <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
-            <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>About</Text>
-            <Text style={{ color: "#aaa", fontSize: 14, lineHeight: 22 }}>BizLedger is a simple finance tracker built for freelancers and small business owners. Track income, expenses, taxes, and budget allocations all in one place.</Text>
-          </View>
-
-          {/* Developer */}
-          <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
-            <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Developer</Text>
-            <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>Benaiah Whaley</Text>
-          </View>
-
-          {/* Donate */}
-          <TouchableOpacity
-            onPress={() => Linking.openURL("https://yourdonationlink.com")}
-            style={{ backgroundColor: "#c9f542", borderRadius: 10, padding: 16, alignItems: "center", marginBottom: 8 }}>
-            <Text style={{ color: "#0e0f11", fontWeight: "800", fontSize: 15 }}>☕ Support BizLedger</Text>
-            <Text style={{ color: "#0e0f11", fontSize: 11, marginTop: 4, opacity: 0.7 }}>Every contribution is appreciated!</Text>
-          </TouchableOpacity>
-
-          {/* Disclaimer */}
-          <Text style={{ color: "#333", fontSize: 11, textAlign: "center", marginTop: 12, lineHeight: 18 }}>
-            Tax estimates are for informational purposes only.{"\n"}Consult a tax professional for advice.
-          </Text>
-
-        </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <Text style={[s.pageTitle, { marginBottom: 0 }]}>Overview</Text>
+        <TouchableOpacity onPress={() => setShowAbout(true)} style={{ borderWidth: 1, borderColor: "#333", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 }}>
+          <Text style={{ color: "#666", fontSize: 12, fontFamily: "monospace" }}>About</Text>
+        </TouchableOpacity>
       </View>
-    </Modal>
+
+      {/* About Modal */}
+      <Modal visible={showAbout} animationType="slide" transparent={true} onRequestClose={() => setShowAbout(false)}>
+        <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <View style={{ backgroundColor: "#141517", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 28, borderTopWidth: 1, borderColor: "#333" }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <Text style={{ color: "#e8e3d9", fontSize: 20, fontWeight: "800" }}>About BizLedger</Text>
+              <TouchableOpacity onPress={() => setShowAbout(false)} style={{ borderWidth: 1, borderColor: "#333", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 }}>
+                <Text style={{ color: "#666", fontSize: 12 }}>✕ Close</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
+              <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Version</Text>
+              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>1.0.0</Text>
+            </View>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
+              <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>About</Text>
+              <Text style={{ color: "#aaa", fontSize: 14, lineHeight: 22 }}>BizLedger is a simple finance tracker built for freelancers and small business owners. Track income, expenses, taxes, and budget allocations all in one place.</Text>
+            </View>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
+              <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Developer</Text>
+              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>Your Name Here</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => Linking.openURL("https://yourdonationlink.com")}
+              style={{ backgroundColor: "#c9f542", borderRadius: 10, padding: 16, alignItems: "center", marginBottom: 8 }}>
+              <Text style={{ color: "#0e0f11", fontWeight: "800", fontSize: 15 }}>☕ Support BizLedger</Text>
+              <Text style={{ color: "#0e0f11", fontSize: 11, marginTop: 4, opacity: 0.7 }}>Every contribution helps!</Text>
+            </TouchableOpacity>
+            <Text style={{ color: "#333", fontSize: 11, textAlign: "center", marginTop: 12, lineHeight: 18 }}>
+              Tax estimates are for informational purposes only.{"\n"}Consult a tax professional for advice.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      <YearSelector transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />
 
       {/* KPI Cards */}
       {[
@@ -250,15 +260,16 @@ function DashboardScreen({ transactions }) {
         </View>
       )}
 
-      {transactions.length === 0 && (
-        <Text style={s.empty}>No transactions yet. Add one in the Transactions tab!</Text>
+      {filtered.length === 0 && (
+        <Text style={s.empty}>No transactions for {selectedYear}. Add one in the Transactions tab!</Text>
       )}
     </ScrollView>
   );
 }
 
 // ─── TRANSACTIONS ─────────────────────────────────────────────────────────────
-function TransactionsScreen({ transactions, setTransactions, recurring, setRecurring }) {
+
+function TransactionsScreen({ transactions, setTransactions, recurring, setRecurring, selectedYear, setSelectedYear }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -280,7 +291,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
   const [recurringTypeOpen, setRecurringTypeOpen] = useState(false);
   const [recurringCatOpen, setRecurringCatOpen] = useState(false);
   const [recurringIntervalOpen, setRecurringIntervalOpen] = useState(false);
-
+  const [showRecurringDatePicker, setShowRecurringDatePicker] = useState(false);
 
   function handleFormChange(field, value) {
     setForm(prev => {
@@ -337,32 +348,34 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
   }
 
   const sorted = [...transactions]
-  .filter(t => {
-    const matchesSearch = search === "" ||
-      t.description.toLowerCase().includes(search.toLowerCase()) ||
-      t.category.toLowerCase().includes(search.toLowerCase());
-    const matchesType = filterType === "all" || t.type === filterType;
-    const matchesFrom = dateFrom === "" || t.date >= dateFrom;
-    const matchesTo = dateTo === "" || t.date <= dateTo;
-    return matchesSearch && matchesType && matchesFrom && matchesTo;
-  })
-  .sort((a, b) => b.date.localeCompare(a.date));
+    .filter(t => {
+      const matchesYear = t.date.startsWith(selectedYear);
+      const matchesSearch = search === "" ||
+        t.description.toLowerCase().includes(search.toLowerCase()) ||
+        t.category.toLowerCase().includes(search.toLowerCase());
+      const matchesType = filterType === "all" || t.type === filterType;
+      const matchesFrom = dateFrom === "" || t.date >= dateFrom;
+      const matchesTo = dateTo === "" || t.date <= dateTo;
+      return matchesYear && matchesSearch && matchesType && matchesFrom && matchesTo;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <Text style={s.pageTitle}>Transactions</Text>
+        <Text style={[s.pageTitle, { marginBottom: 0 }]}>Transactions</Text>
         <TouchableOpacity style={s.addBtn} onPress={() => { setEditingId(null); setShowForm(!showForm); }}>
           <Text style={s.addBtnText}>+ Add</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Form */}
+      <YearSelector transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />
+
+      {/* Add/Edit Form */}
       {showForm && (
         <View style={s.card}>
           <Text style={s.sectionTitle}>{editingId ? "Edit Transaction" : "New Transaction"}</Text>
 
-          {/* Type picker */}
           <Text style={s.fieldLabel}>Type</Text>
           <TouchableOpacity style={s.picker} onPress={() => setTypeOpen(!typeOpen)}>
             <Text style={s.pickerText}>{form.type === "income" ? "Income" : "Expense"}</Text>
@@ -373,7 +386,6 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
             </TouchableOpacity>
           ))}
 
-          {/* Category picker */}
           <Text style={s.fieldLabel}>Category</Text>
           <TouchableOpacity style={s.picker} onPress={() => setCatOpen(!catOpen)}>
             <Text style={s.pickerText}>{form.category}</Text>
@@ -401,15 +413,13 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
               display="default"
               onChange={(event, selectedDate) => {
                 setShowDatePicker(false);
-                if (selectedDate) {
-                  handleFormChange("date", selectedDate.toISOString().split("T")[0]);
-                }
+                if (selectedDate) handleFormChange("date", selectedDate.toISOString().split("T")[0]);
               }}
             />
           )}
 
           <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-            <TouchableOpacity style={s.submitBtn} onPress={handleSubmit}>
+            <TouchableOpacity style={[s.submitBtn, { flex: 1 }]} onPress={handleSubmit}>
               <Text style={s.submitBtnText}>{editingId ? "Save Changes" : "Add Transaction"}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowForm(false); setEditingId(null); }}>
@@ -419,7 +429,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
         </View>
       )}
 
-      {/* Recurring transactions */}
+      {/* Recurring Transactions */}
       <TouchableOpacity
         style={[s.card, { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }]}
         onPress={() => setShowRecurring(!showRecurring)}>
@@ -432,16 +442,14 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
 
       {showRecurring && (
         <View style={[s.card, { marginBottom: 12 }]}>
-        
-          {/* Due now */}
           {recurring.filter(r => isDue(r.nextDate)).length > 0 && (
             <View style={{ marginBottom: 16 }}>
               <Text style={[s.sectionTitle, { color: "#ff6b6b" }]}>Due Now</Text>
               {recurring.filter(r => isDue(r.nextDate)).map(r => (
                 <View key={r.id} style={{ backgroundColor: "rgba(255,107,107,0.07)", borderRadius: 8, padding: 12, marginBottom: 8 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-                    <View>
-                      <Text style={{ color: "#ddd", fontSize: 13 }}>{r.description || r.category}</Text>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={{ color: "#ddd", fontSize: 13 }} numberOfLines={1}>{r.description || r.category}</Text>
                       <Text style={{ color: "#555", fontSize: 11 }}>{r.category} · {r.interval}</Text>
                     </View>
                     <Text style={{ color: r.type === "income" ? "#c9f542" : "#ff6b6b", fontWeight: "700", fontSize: 14 }}>
@@ -461,7 +469,6 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
             </View>
           )}
 
-          {/* Upcoming */}
           {recurring.filter(r => !isDue(r.nextDate)).length > 0 && (
             <View style={{ marginBottom: 12 }}>
               <Text style={s.sectionTitle}>Upcoming</Text>
@@ -484,15 +491,12 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
             </View>
           )}
 
-          {recurring.length === 0 && (
-            <Text style={s.empty}>No recurring transactions yet.</Text>
-          )}
+          {recurring.length === 0 && <Text style={s.empty}>No recurring transactions yet.</Text>}
 
-          {/* Add recurring form */}
           {showRecurringForm && (
             <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: "#1e1f23", paddingTop: 12 }}>
               <Text style={s.sectionTitle}>New Recurring Transaction</Text>
-          
+
               <Text style={s.fieldLabel}>Type</Text>
               <TouchableOpacity style={s.picker} onPress={() => setRecurringTypeOpen(!recurringTypeOpen)}>
                 <Text style={s.pickerText}>{recurringForm.type === "income" ? "Income" : "Expense"}</Text>
@@ -515,10 +519,10 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
 
               <Text style={s.fieldLabel}>Amount ($)</Text>
               <TextInput style={s.input} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor="#555" value={recurringForm.amount} onChangeText={v => setRecurringForm(p => ({ ...p, amount: v }))} />
-            
+
               <Text style={s.fieldLabel}>Description</Text>
               <TextInput style={s.input} placeholder="e.g. Adobe CC subscription" placeholderTextColor="#555" value={recurringForm.description} onChangeText={v => setRecurringForm(p => ({ ...p, description: v }))} />
-            
+
               <Text style={s.fieldLabel}>Interval</Text>
               <TouchableOpacity style={s.picker} onPress={() => setRecurringIntervalOpen(!recurringIntervalOpen)}>
                 <Text style={s.pickerText}>{recurringForm.interval.charAt(0).toUpperCase() + recurringForm.interval.slice(1)}</Text>
@@ -530,16 +534,16 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
               ))}
 
               <Text style={s.fieldLabel}>First Due Date</Text>
-              <TouchableOpacity style={s.picker} onPress={() => setShowDatePicker(true)}>
+              <TouchableOpacity style={s.picker} onPress={() => setShowRecurringDatePicker(true)}>
                 <Text style={s.pickerText}>{recurringForm.nextDate}</Text>
               </TouchableOpacity>
-              {showDatePicker && (
+              {showRecurringDatePicker && (
                 <DateTimePicker
                   value={new Date(recurringForm.nextDate)}
                   mode="date"
                   display="default"
                   onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
+                    setShowRecurringDatePicker(false);
                     if (selectedDate) setRecurringForm(p => ({ ...p, nextDate: selectedDate.toISOString().split("T")[0] }));
                   }}
                 />
@@ -579,13 +583,12 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
           <Text style={[s.txBtnText, { color: showFilters ? "#c9f542" : "#666" }]}>⚙ Filter</Text>
         </TouchableOpacity>
       </View>
-          
+
       {/* Filter panel */}
       {showFilters && (
         <View style={[s.card, { marginBottom: 12 }]}>
           <Text style={s.sectionTitle}>Filters</Text>
-      
-          {/* Type filter */}
+
           <Text style={s.fieldLabel}>Type</Text>
           <TouchableOpacity style={s.picker} onPress={() => setFilterTypeOpen(!filterTypeOpen)}>
             <Text style={s.pickerText}>{filterType === "all" ? "All Types" : filterType === "income" ? "Income" : "Expense"}</Text>
@@ -595,8 +598,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
               <Text style={s.pickerOptionText}>{t === "all" ? "All Types" : t === "income" ? "Income" : "Expense"}</Text>
             </TouchableOpacity>
           ))}
-      
-          {/* Date range */}
+
           <Text style={s.fieldLabel}>Show transactions after</Text>
           <TouchableOpacity style={s.picker} onPress={() => setShowFromPicker(true)}>
             <Text style={s.pickerText}>{dateFrom || "Select a date..."}</Text>
@@ -628,8 +630,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
               }}
             />
           )}
-      
-          {/* Clear filters */}
+
           <TouchableOpacity
             style={[s.cancelBtn, { marginTop: 12, alignItems: "center" }]}
             onPress={() => { setSearch(""); setFilterType("all"); setDateFrom(""); setDateTo(""); }}>
@@ -637,8 +638,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
           </TouchableOpacity>
         </View>
       )}
-      
-      {/* Result count */}
+
       {(search || filterType !== "all" || dateFrom || dateTo) && (
         <Text style={{ color: "#555", fontSize: 11, marginBottom: 8, fontFamily: "monospace" }}>
           {sorted.length} result{sorted.length !== 1 ? "s" : ""}
@@ -646,7 +646,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
       )}
 
       {/* Transaction list */}
-      {sorted.length === 0 && <Text style={s.empty}>No transactions yet.</Text>}
+      {sorted.length === 0 && <Text style={s.empty}>No transactions found.</Text>}
       {sorted.map(t => (
         <View key={t.id} style={s.txRow}>
           <View style={[s.txIcon, { backgroundColor: t.type === "income" ? "rgba(201,245,66,0.1)" : "rgba(255,107,107,0.1)" }]}>
@@ -684,90 +684,12 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
   );
 }
 
-// ─── TAXES ────────────────────────────────────────────────────────────────────
-function TaxesScreen({ transactions }) {
-  const totalIncome = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
-  const netProfit = totalIncome - totalExpenses;
-  const taxes = estimateTax(netProfit);
-  const [stateTaxRate, setStateTaxRate] = useState("0");
-  const stateTax = (parseFloat(stateTaxRate) / 100) * netProfit;
-  const totalWithState = taxes.total + stateTax;
+// ─── ALLOCATIONS ──────────────────────────────────────────────────────────────
 
-async function exportCSV() {
-  try {
-    const header = "Date,Type,Category,Description,Amount\n";
-    const rows = transactions
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map(t => `${t.date},${t.type},${t.category},"${t.description}",${t.amount}`)
-      .join("\n");
-    const csv = header + rows;
-    const fileUri = FileSystem.documentDirectory + "bizledger-export.csv";
-    await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: "utf8" });
-    const isAvailable = await Sharing.isAvailableAsync();
-    console.log("Sharing available:", isAvailable);
-    if (isAvailable) {
-      await Sharing.shareAsync(fileUri);
-    } else {
-      console.log("Sharing not available on this device");
-    }
-  } catch (e) {
-    console.error("Export error:", e);
-  }
-}
-
-  return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
-      <Text style={s.pageTitle}>Tax Estimate</Text>
-
-      <View style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
-        <Text style={s.cardLabel}>Your State Tax Rate (%)</Text>
-        <TextInput
-          style={[s.input, { width: 80, textAlign: "center" }]}
-          keyboardType="decimal-pad"
-          placeholder="0.0"
-          placeholderTextColor="#555"
-          value={stateTaxRate}
-          onChangeText={setStateTaxRate}
-          />
-      </View>
-
-      {[
-        { label: "State Income Tax", value: stateTax, sub: `${stateTaxRate}% state rate` },
-        { label: "Self-Employment Tax", value: taxes.selfEmployment, sub: "14.13% on net profit" },
-        { label: "Federal Income Tax", value: taxes.federal, sub: "After SE deduction" },
-        { label: "Total Estimated Tax", value: totalWithState, sub: `${((totalWithState / netProfit) * 100 || 0) .toFixed(1)}% effectiveRate`, highlight: true },
-      ].map(c => (
-        <View key={c.label} style={[s.card, c.highlight && { borderColor: "#f7b731" }]}>
-          <Text style={s.cardLabel}>{c.label}</Text>
-          <Text style={[s.cardValue, { color: c.highlight ? "#f7b731" : "#e8e3d9" }]}>{fmt(c.value)}</Text>
-          <Text style={s.cardSub}>{c.sub}</Text>
-        </View>
-      ))}
-
-      <View style={s.card}>
-        <Text style={s.sectionTitle}>Quarterly Payments</Text>
-        {["Q1 — Apr 15", "Q2 — Jun 16", "Q3 — Sep 15", "Q4 — Jan 15"].map(q => (
-          <View key={q} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1e1f23" }}>
-            <Text style={s.catLabel}>{q}</Text>
-            <Text style={{ color: "#f7b731", fontFamily: "monospace", fontSize: 14 }}>{fmt(totalWithState / 4)}</Text>
-          </View>
-        ))}
-      </View>
-
-    <TouchableOpacity style={[s.addBtn, { marginTop: 16}]} onPress={exportCSV}>
-      <Text style={s.addBtnText}>Export CSV</Text>
-    </TouchableOpacity>
-
-      <Text style={s.disclaimer}>⚠️ Estimate only. Consult a tax professional for advice.</Text>
-    </ScrollView>
-  );
-}
-
-// ─── ALLOCATIONS ────────────────────────────────────────────────────────────────────
-function AllocationsScreen({ transactions }) {
-  const totalIncome = transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+function AllocationsScreen({ transactions, selectedYear, setSelectedYear }) {
+  const filtered = transactions.filter(t => t.date.startsWith(selectedYear));
+  const totalIncome = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const netProfit = totalIncome - totalExpenses;
   const taxes = estimateTax(netProfit);
   const afterTax = Math.max(0, netProfit - taxes.total);
@@ -822,8 +744,8 @@ function AllocationsScreen({ transactions }) {
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
       <Text style={s.pageTitle}>Allocations</Text>
+      <YearSelector transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />
 
-      {/* After tax summary */}
       <View style={[s.card, { flexDirection: "row", justifyContent: "space-between", marginBottom: 16 }]}>
         <View>
           <Text style={s.cardLabel}>Gross Profit</Text>
@@ -845,15 +767,11 @@ function AllocationsScreen({ transactions }) {
             <Text style={{ color: fw.color, fontSize: 16, fontWeight: "800" }}>{fw.name}</Text>
             <Text style={{ color: "#555", fontSize: 11 }}>{fw.description}</Text>
           </View>
-
-          {/* Stacked bar */}
           <View style={{ flexDirection: "row", height: 10, borderRadius: 5, overflow: "hidden", marginBottom: 14, marginTop: 8 }}>
             {fw.slices.map(slice => (
               <View key={slice.label} style={{ flex: slice.pct, backgroundColor: slice.color }} />
             ))}
           </View>
-
-          {/* Slice breakdown */}
           {fw.slices.map(slice => (
             <View key={slice.label} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#1e1f23" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -867,41 +785,105 @@ function AllocationsScreen({ transactions }) {
         </View>
       ))}
 
-      {netProfit <= 0 && (
-        <Text style={s.empty}>Add some income to see your allocations!</Text>
-      )}
+      {netProfit <= 0 && <Text style={s.empty}>Add some income to see your allocations!</Text>}
+    </ScrollView>
+  );
+}
+
+// ─── TAXES ────────────────────────────────────────────────────────────────────
+
+function TaxesScreen({ transactions, selectedYear, setSelectedYear }) {
+  const [stateTaxRate, setStateTaxRate] = useState("0");
+  const filtered = transactions.filter(t => t.date.startsWith(selectedYear));
+  const totalIncome = filtered.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = filtered.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const netProfit = totalIncome - totalExpenses;
+  const taxes = estimateTax(netProfit);
+  const stateTax = (parseFloat(stateTaxRate) / 100) * netProfit;
+  const totalWithState = taxes.total + stateTax;
+
+  async function exportCSV() {
+    try {
+      const header = "Date,Type,Category,Description,Amount\n";
+      const rows = filtered
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(t => `${t.date},${t.type},${t.category},"${t.description}",${t.amount}`)
+        .join("\n");
+      const csv = header + rows;
+      const fileUri = FileSystem.documentDirectory + "bizledger-export.csv";
+      await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) await Sharing.shareAsync(fileUri);
+    } catch (e) {
+      console.error("Export error:", e);
+    }
+  }
+
+  return (
+    <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
+      <Text style={s.pageTitle}>Tax Estimate</Text>
+      <YearSelector transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />
+
+      <View style={[s.card, { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
+        <Text style={s.cardLabel}>Your State Tax Rate (%)</Text>
+        <TextInput
+          style={[s.input, { width: 80, textAlign: "center" }]}
+          keyboardType="decimal-pad"
+          placeholder="0.0"
+          placeholderTextColor="#555"
+          value={stateTaxRate}
+          onChangeText={setStateTaxRate}
+        />
+      </View>
+
+      {[
+        { label: "Self-Employment Tax", value: taxes.selfEmployment, sub: "14.13% on net profit" },
+        { label: "Federal Income Tax", value: taxes.federal, sub: "After SE deduction" },
+        { label: "State Income Tax", value: stateTax, sub: `${stateTaxRate}% state rate` },
+        { label: "Total Estimated Tax", value: totalWithState, sub: `${((totalWithState / netProfit) * 100 || 0).toFixed(1)}% effective rate`, highlight: true },
+      ].map(c => (
+        <View key={c.label} style={[s.card, c.highlight && { borderColor: "#f7b731" }]}>
+          <Text style={s.cardLabel}>{c.label}</Text>
+          <Text style={[s.cardValue, { color: c.highlight ? "#f7b731" : "#e8e3d9" }]}>{fmt(c.value)}</Text>
+          <Text style={s.cardSub}>{c.sub}</Text>
+        </View>
+      ))}
+
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>Quarterly Payments</Text>
+        {["Q1 — Apr 15", "Q2 — Jun 16", "Q3 — Sep 15", "Q4 — Jan 15"].map(q => (
+          <View key={q} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1e1f23" }}>
+            <Text style={s.catLabel}>{q}</Text>
+            <Text style={{ color: "#f7b731", fontFamily: "monospace", fontSize: 14 }}>{fmt(totalWithState / 4)}</Text>
+          </View>
+        ))}
+      </View>
+
+      <TouchableOpacity style={[s.addBtn, { marginTop: 16, alignItems: "center" }]} onPress={exportCSV}>
+        <Text style={s.addBtnText}>Export CSV</Text>
+      </TouchableOpacity>
+
+      <Text style={s.disclaimer}>⚠️ Estimate only. Consult a tax professional for advice.</Text>
     </ScrollView>
   );
 }
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
+
 export default function App() {
   const [transactions, setTransactions] = useState([]);
-  const [onboarded, setOnboarded] = useState(null);
   const [recurring, setRecurring] = useState([]);
-
-  //DELETE THIS LINE
-  AsyncStorage.removeItem("onboarded");
+  const [onboarded, setOnboarded] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
   useEffect(() => {
-    AsyncStorage.getItem("transactions").then(data => {
-      if (data) setTransactions(JSON.parse(data));
-    });
-    AsyncStorage.getItem("onboarded").then(val => {
-      setOnboarded(val === "true");
-    });
-    AsyncStorage.getItem("recurring").then(data => {
-      if (data) setRecurring(JSON.parse(data));
-    });
+    AsyncStorage.getItem("transactions").then(data => { if (data) setTransactions(JSON.parse(data)); });
+    AsyncStorage.getItem("recurring").then(data => { if (data) setRecurring(JSON.parse(data)); });
+    AsyncStorage.getItem("onboarded").then(val => { setOnboarded(val === "true"); });
   }, []);
 
-  useEffect(() => {
-    AsyncStorage.setItem("recurring", JSON.stringify(recurring));
-  }, [recurring]);
-
-  useEffect(() => {
-    AsyncStorage.setItem("transactions", JSON.stringify(transactions));
-  }, [transactions]);
+  useEffect(() => { AsyncStorage.setItem("transactions", JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { AsyncStorage.setItem("recurring", JSON.stringify(recurring)); }, [recurring]);
 
   async function handleOnboardingFinish() {
     await AsyncStorage.setItem("onboarded", "true");
@@ -920,25 +902,24 @@ export default function App() {
         tabBarInactiveTintColor: "#555",
         tabBarLabelStyle: { fontFamily: "monospace", fontSize: 11 },
       }}>
-        <Tab.Screen name="Dashboard" children={() => <DashboardScreen transactions={transactions} />} />
+        <Tab.Screen name="Dashboard" children={() => <DashboardScreen transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />} />
         <Tab.Screen
           name="Transactions"
-          children={() => <TransactionsScreen transactions={transactions} setTransactions={setTransactions} recurring={recurring} setRecurring={setRecurring} />}
+          children={() => <TransactionsScreen transactions={transactions} setTransactions={setTransactions} recurring={recurring} setRecurring={setRecurring} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />}
           options={{
-            tabBarBadge: recurring.filter(r => isDue(r.nextDate)).length > 0
-              ? recurring.filter(r => isDue(r.nextDate)).length
-              : undefined,
+            tabBarBadge: recurring.filter(r => isDue(r.nextDate)).length > 0 ? recurring.filter(r => isDue(r.nextDate)).length : undefined,
             tabBarBadgeStyle: { backgroundColor: "#ff6b6b" }
           }}
         />
-        <Tab.Screen name="Allocations" children={() => <AllocationsScreen transactions={transactions} />} />
-        <Tab.Screen name="Taxes" children={() => <TaxesScreen transactions={transactions} />} />
+        <Tab.Screen name="Allocations" children={() => <AllocationsScreen transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />} />
+        <Tab.Screen name="Taxes" children={() => <TaxesScreen transactions={transactions} selectedYear={selectedYear} setSelectedYear={setSelectedYear} />} />
       </Tab.Navigator>
     </NavigationContainer>
   );
 }
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#0e0f11" },
   pageTitle: { color: "#e8e3d9", fontSize: 24, fontWeight: "800", marginBottom: 16 },
@@ -971,4 +952,19 @@ const s = StyleSheet.create({
   txBtn: { borderWidth: 1, borderColor: "#2a2b2f", borderRadius: 5, paddingHorizontal: 8, paddingVertical: 4 },
   txBtnText: { color: "#666", fontSize: 11 },
   disclaimer: { color: "#444", fontSize: 11, marginTop: 12, lineHeight: 18 },
+});
+
+const ob = StyleSheet.create({
+  slide: { flex: 1, backgroundColor: "#0e0f11", paddingHorizontal: 32, justifyContent: "center", paddingBottom: 80 },
+  iconBox: { width: 80, height: 80, borderRadius: 20, backgroundColor: "rgba(201,245,66,0.1)", borderWidth: 1, borderColor: "rgba(201,245,66,0.2)", alignItems: "center", justifyContent: "center", marginBottom: 32 },
+  iconText: { fontSize: 36, color: "#c9f542" },
+  tag: { color: "#555", fontSize: 10, letterSpacing: 3, marginBottom: 8 },
+  title: { color: "#e8e3d9", fontSize: 42, fontWeight: "800", lineHeight: 48, marginBottom: 16 },
+  body: { color: "#666", fontSize: 15, lineHeight: 24, marginBottom: 24 },
+  featureList: { gap: 10 },
+  featureRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  featureDot: { color: "#4ecdc4", fontSize: 12 },
+  featureText: { color: "#555", fontSize: 13 },
+  btn: { backgroundColor: "#c9f542", borderRadius: 12, paddingVertical: 16, paddingHorizontal: 32, alignItems: "center", marginTop: 8 },
+  btnText: { color: "#0e0f11", fontWeight: "800", fontSize: 16 },
 });
