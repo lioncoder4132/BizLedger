@@ -212,7 +212,7 @@ function DashboardScreen({ transactions, selectedYear, setSelectedYear }) {
             </View>
             <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
               <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Developer</Text>
-              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>Your Name Here</Text>
+              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>Benaiah Whaley</Text>
             </View>
             <TouchableOpacity
               onPress={() => Linking.openURL("https://yourdonationlink.com")}
@@ -737,6 +737,17 @@ function AllocationsScreen({ transactions, selectedYear, setSelectedYear }) {
         { label: "Investing", pct: 0.50, color: "#a78bfa" },
         { label: "Needs", pct: 0.30, color: "#c9f542" },
         { label: "Wants", pct: 0.20, color: "#4ecdc4" },
+      ],
+    },
+    {
+      name: "Benaiah Whaley",
+      description: "Benaiah Whaley's personal allocation method",
+      color: "#b3n1ah",
+      slices: [
+        { label: "Investing", pct: 0.40, color: "a78bfa" },
+        { label: "Business/Needs", pct: 0.25, color: "#c9f542" },
+        { label: "Wants", pct: 0.25, color: "#4ecdc4" },
+        { label: "Giving", pct: 0.10, color: "ff6b6b" },
       ],
     },
   ];
