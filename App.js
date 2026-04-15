@@ -740,14 +740,15 @@ function AllocationsScreen({ transactions, selectedYear, setSelectedYear }) {
       ],
     },
     {
-      name: "Benaiah Whaley",
-      description: "Benaiah Whaley's personal allocation method",
-      color: "#b3n1ah",
+      name: "High School Focus",
+      description: "high school business owner",
+      color: "#ff6b6b",
       slices: [
-        { label: "Investing", pct: 0.40, color: "a78bfa" },
-        { label: "Business/Needs", pct: 0.25, color: "#c9f542" },
-        { label: "Wants", pct: 0.25, color: "#4ecdc4" },
-        { label: "Giving", pct: 0.10, color: "ff6b6b" },
+        { label: "Investing", pct: 0.35, color: "#a78bfa" },
+        { label: "Business", pct: 0.25, color: "#c9f542" },
+        { label: "Wants", pct: 0.20, color: "#4ecdc4" },
+        { label: "Needs", pct: 0.10, color: "#f7b731" },
+        { label: "Giving", pct: 0.10, color: "#ff6b6b" },
       ],
     },
   ];
