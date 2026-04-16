@@ -4,10 +4,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import Svg, { Rect, Line, Circle, Path } from "react-native-svg";
 import Swiper from "react-native-swiper";
+import * as ImagePicker from "expo-image-picker";
 
 const Tab = createBottomTabNavigator();
 
@@ -273,7 +274,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [form, setForm] = useState({ type: "income", amount: "", category: CATEGORIES.income[0], description: "", date: new Date().toISOString().split("T")[0] });
+  const [form, setForm] = useState({ type: "income", amount: "", category: CATEGORIES.income[0], description: "", date: new Date().toISOString().split("T")[0], photo: null });
   const [typeOpen, setTypeOpen] = useState(false);
   const [catOpen, setCatOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -287,11 +288,14 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
   const [showToPicker, setShowToPicker] = useState(false);
   const [showRecurring, setShowRecurring] = useState(false);
   const [showRecurringForm, setShowRecurringForm] = useState(false);
-  const [recurringForm, setRecurringForm] = useState({ type: "expense", amount: "", category: CATEGORIES.expense[0], description: "", interval: "monthly", nextDate: new Date().toISOString().split("T")[0] });
+  const [recurringForm, setRecurringForm] = useState({ type: "expense", amount: "", category: CATEGORIES.expense[0], description: "", interval: "monthly", nextDate: new Date().toISOString().split("T")[0], photo: null });
   const [recurringTypeOpen, setRecurringTypeOpen] = useState(false);
   const [recurringCatOpen, setRecurringCatOpen] = useState(false);
   const [recurringIntervalOpen, setRecurringIntervalOpen] = useState(false);
   const [showRecurringDatePicker, setShowRecurringDatePicker] = useState(false);
+  const dueRecurring = recurring.filter(r => isDue(r.nextDate));
+  const [selectedTx, setSelectedTx] = useState(null);
+  
 
   function handleFormChange(field, value) {
     setForm(prev => {
@@ -299,6 +303,21 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
       if (field === "type") next.category = CATEGORIES[value][0];
       return next;
     });
+  }
+
+  async function pickImage() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.mediaTypes.Images,
+      allowsEditing: true,
+      quality: 0.7,
+    });
+
+    if (!result.canceled) {
+      handleFormChange("photo", result.assets[0].uri);
+    }
   }
 
   function handleSubmit() {
@@ -402,6 +421,13 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
           <Text style={s.fieldLabel}>Description</Text>
           <TextInput style={s.input} placeholder="What's this for?" placeholderTextColor="#555" value={form.description} onChangeText={v => handleFormChange("description", v)} />
 
+          <Text style={s.fieldLabel}>Photo (optional)</Text>
+            <TouchableOpacity style={s.picker} onPress={pickImage}>
+              <Text style={s.pickerText}>
+                {form.photo ? "Photo selected ✓" : "Add receipt photo"}
+              </Text>
+            </TouchableOpacity>
+
           <Text style={s.fieldLabel}>Date</Text>
           <TouchableOpacity style={s.picker} onPress={() => setShowDatePicker(true)}>
             <Text style={s.pickerText}>{form.date}</Text>
@@ -435,14 +461,14 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
         onPress={() => setShowRecurring(!showRecurring)}>
         <View>
           <Text style={{ color: "#e8e3d9", fontSize: 14, fontWeight: "700" }}>Recurring Transactions</Text>
-          <Text style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{recurring.length} active · {recurring.filter(r => isDue(r.nextDate)).length} due</Text>
+          <Text style={{ color: "#555", fontSize: 11, marginTop: 2 }}>{recurring.length} active · {dueRecurring.length} due</Text>
         </View>
         <Text style={{ color: "#666", fontSize: 18 }}>{showRecurring ? "▲" : "▼"}</Text>
       </TouchableOpacity>
 
       {showRecurring && (
         <View style={[s.card, { marginBottom: 12 }]}>
-          {recurring.filter(r => isDue(r.nextDate)).length > 0 && (
+          {dueRecurring.length > 0 && (
             <View style={{ marginBottom: 16 }}>
               <Text style={[s.sectionTitle, { color: "#ff6b6b" }]}>Due Now</Text>
               {recurring.filter(r => isDue(r.nextDate)).map(r => (
@@ -469,7 +495,7 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
             </View>
           )}
 
-          {recurring.filter(r => !isDue(r.nextDate)).length > 0 && (
+          {dueRecurring.length > 0 && (
             <View style={{ marginBottom: 12 }}>
               <Text style={s.sectionTitle}>Upcoming</Text>
               {recurring.filter(r => !isDue(r.nextDate)).map(r => (
@@ -648,11 +674,50 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
       {/* Transaction list */}
       {sorted.length === 0 && <Text style={s.empty}>No transactions found.</Text>}
       {sorted.map(t => (
-        <View key={t.id} style={s.txRow}>
-          <View style={[s.txIcon, { backgroundColor: t.type === "income" ? "rgba(201,245,66,0.1)" : "rgba(255,107,107,0.1)" }]}>
-            <Text style={{ color: t.type === "income" ? "#c9f542" : "#ff6b6b", fontSize: 18 }}>{t.type === "income" ? "↑" : "↓"}</Text>
+        <TouchableOpacity key={t.id} style={s.txRow} onPress={() => setSelectedTx(t)}>
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+                
+            {/* LEFT GROUP: icon + photo */}
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+                
+              <View
+                style={[
+                  s.txIcon,
+                  {
+                    backgroundColor:
+                      t.type === "income"
+                        ? "rgba(201,245,66,0.1)"
+                        : "rgba(255,107,107,0.1)",
+                  },
+                ]}
+              >
+                <Text
+                  style={{
+                    color: t.type === "income" ? "#c9f542" : "#ff6b6b",
+                    fontSize: 18,
+                  }}
+                >
+                  {t.type === "income" ? "↑" : "↓"}
+                </Text>
+              </View>
+                
+              {t.photo && (
+                <Image
+                  source={{ uri: t.photo }}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 8,
+                    marginLeft: 8,
+                  }}
+                />
+              )}
+          
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
+            
+            {/* TEXT BLOCK */}
+            <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={s.txDesc} numberOfLines={1}>{t.description || t.category}</Text>
             <Text style={s.txMeta}>{t.category} · {t.date}</Text>
           </View>
@@ -678,8 +743,89 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
       ))}
+
+      <Modal
+        visible={!!selectedTx}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSelectedTx(null)}
+      >
+        <View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <View style={{
+            backgroundColor: "#141517",
+            padding: 20,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            borderTopWidth: 1,
+            borderColor: "#333"
+          }}>
+          
+            {selectedTx && (
+              <>
+                <Text style={{ color: "#e8e3d9", fontSize: 20, fontWeight: "800", marginBottom: 10 }}>
+                  {selectedTx.description || selectedTx.category}
+                </Text>
+
+                <Text style={{ color: "#aaa", marginBottom: 6 }}>
+                  Category: {selectedTx.category}
+                </Text>
+
+                <Text style={{ color: "#aaa", marginBottom: 6 }}>
+                  Type: {selectedTx.type}
+                </Text>
+
+                <Text style={{ color: "#aaa", marginBottom: 6 }}>
+                  Date: {selectedTx.date}
+                </Text>
+
+                <Text style={{ color: "#c9f542", fontSize: 18, fontWeight: "700", marginTop: 10 }}>
+                  {selectedTx.type === "income" ? "+" : "-"}
+                  {fmt(selectedTx.amount)}
+                </Text>
+
+                {selectedTx?.photo && (
+                  <Image
+                    source={{ uri: selectedTx.photo }}
+                    style={{
+                      width: "100%",
+                      height: 220,
+                      borderRadius: 12,
+                      marginTop: 12
+                    }}
+                    resizeMode="cover"
+                  />
+                )}
+
+                <View style={{ marginTop: 16 }}>
+                  <Text style={{ color: "#555", fontSize: 10, textTransform: "uppercase", marginBottom: 4 }}>
+                    Full Description
+                  </Text>
+                  <Text style={{ color: "#ddd", lineHeight: 20 }}>
+                    {selectedTx.description || "No description provided."}
+                  </Text>
+                </View>
+            
+                <TouchableOpacity
+                  onPress={() => setSelectedTx(null)}
+                  style={{
+                    marginTop: 20,
+                    padding: 12,
+                    borderWidth: 1,
+                    borderColor: "#333",
+                    borderRadius: 8,
+                    alignItems: "center"
+                  }}
+                >
+                  <Text style={{ color: "#aaa" }}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+      
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -819,17 +965,24 @@ function TaxesScreen({ transactions, selectedYear, setSelectedYear }) {
       const header = "Date,Type,Category,Description,Amount\n";
       const rows = filtered
         .sort((a, b) => a.date.localeCompare(b.date))
-        .map(t => `${t.date},${t.type},${t.category},"${t.description}",${t.amount}`)
+        .map(t =>`${t.date},${t.type},${t.category},"${(t.description || "").replace(/"/g, '""')}",${t.amount}`)
         .join("\n");
+
       const csv = header + rows;
       const fileUri = FileSystem.documentDirectory + "bizledger-export.csv";
-      await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+
+      await FileSystem.writeAsStringAsync(fileUri, csv); // 👈 fixed
+
       const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) await Sharing.shareAsync(fileUri);
+      if (isAvailable) {
+        await Sharing.shareAsync(fileUri);
+      } else {
+        console.log("Sharing not available");
+      }
     } catch (e) {
       console.error("Export error:", e);
     }
-  }
+  } 
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: 16, paddingBottom: 40, paddingTop: 50 }}>
@@ -889,9 +1042,20 @@ export default function App() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
   useEffect(() => {
-    AsyncStorage.getItem("transactions").then(data => { if (data) setTransactions(JSON.parse(data)); });
-    AsyncStorage.getItem("recurring").then(data => { if (data) setRecurring(JSON.parse(data)); });
-    AsyncStorage.getItem("onboarded").then(val => { setOnboarded(val === "true"); });
+    async function loadData() {
+    try {
+      const t = await AsyncStorage.getItem("transactions");
+      const r = await AsyncStorage.getItem("recurring");
+      const o = await AsyncStorage.getItem("onboarded");
+
+      if (t) setTransactions(JSON.parse(t));
+      if (r) setRecurring(JSON.parse(r));
+      setOnboarded(o === "true");
+    } catch (e) {
+      console.error("Load error:", e);
+    }
+  }
+  loadData();
   }, []);
 
   useEffect(() => { AsyncStorage.setItem("transactions", JSON.stringify(transactions)); }, [transactions]);
