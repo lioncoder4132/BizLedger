@@ -205,7 +205,7 @@ function DashboardScreen({ transactions, selectedYear, setSelectedYear }) {
             </View>
             <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
               <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Version</Text>
-              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>1.0.0</Text>
+              <Text style={{ color: "#aaa", fontSize: 14, fontFamily: "monospace" }}>1.0.2</Text>
             </View>
             <View style={{ borderBottomWidth: 1, borderBottomColor: "#1e1f23", paddingBottom: 16, marginBottom: 16 }}>
               <Text style={{ color: "#555", fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>About</Text>
@@ -307,7 +307,11 @@ function TransactionsScreen({ transactions, setTransactions, recurring, setRecur
 
   async function pickImage() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
+    if (!permission.granted) {
+      alert("Permission needed to access photos");
+      Linking.openSettings();
+      return;
+    }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.mediaTypes.Images,
@@ -1050,7 +1054,8 @@ export default function App() {
 
       if (t) setTransactions(JSON.parse(t));
       if (r) setRecurring(JSON.parse(r));
-      setOnboarded(o === "true");
+      if (o === null) setOnboarded(false);
+        else setOnboarded(o === "true");
     } catch (e) {
       console.error("Load error:", e);
     }
